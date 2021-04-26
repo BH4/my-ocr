@@ -12,10 +12,10 @@ from define_models import fully_connected, simple_convolution, full_convolution
 batch_size = 64
 
 # Get dataset
-f = h5py.File('..\\data\\processed\\train.h5', 'r')
+f = h5py.File('..\\data\\processed\\train_merge.h5', 'r')
 x_train = np.array(f['X'])
 y_train = np.array(f['Y'])
-f = h5py.File('..\\data\\processed\\validation.h5', 'r')
+f = h5py.File('..\\data\\processed\\validation_merge.h5', 'r')
 x_val = np.array(f['X'])
 y_val = np.array(f['Y'])
 
@@ -39,7 +39,7 @@ history = model.fit(
     validation_data=(x_val, y_val),
     verbose=1, callbacks=[ES], shuffle=True)
 
-model.save('../models/temp_model')
+model.save('../models/merge_model')
 model.summary()
 
 Y_pred = model.predict(x_val, batch_size=batch_size)
@@ -64,13 +64,3 @@ plt.ylabel('loss')
 plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.show()
-
-
-"""
-test_gen = datagen.flow_from_directory(
-        '../data/validation',
-        target_size=img_size,
-        batch_size=batch_size,
-        class_mode='categorical',
-        color_mode='grayscale')
-"""
