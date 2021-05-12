@@ -1,12 +1,11 @@
 import matplotlib.pyplot as plt
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.metrics import confusion_matrix
 
 import numpy as np
 import h5py
 
-from define_models import fully_connected, simple_convolution, full_convolution
-
+import define_models
 
 # Hyper parameters
 batch_size = 64
@@ -29,9 +28,9 @@ print(y_val.shape)
 
 # Train
 input_shape = (1, img_size[0], img_size[1], 1)
-model = simple_convolution(input_shape, num_classes)
+model = define_models.full_convolution(input_shape, num_classes)
 
-ES = EarlyStopping(monitor='val_loss', min_delta=0, patience=4)  # This works on the scale of epochs... Takes me over an hour to get through 1.
+ES = EarlyStopping(monitor='val_loss', min_delta=0, patience=4)
 
 history = model.fit(
     x=x_train, y=y_train,
