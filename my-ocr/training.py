@@ -11,12 +11,12 @@ import define_models
 batch_size = 64
 
 # Get dataset
-f = h5py.File('..\\data\\processed\\train_merge.h5', 'r')
-x_train = np.array(f['X'])
-y_train = np.array(f['Y'])
-f = h5py.File('..\\data\\processed\\validation_merge.h5', 'r')
-x_val = np.array(f['X'])
-y_val = np.array(f['Y'])
+f = h5py.File('..\\data\\processed\\full_62_classes_seed4444_train.h5', 'r')
+x_train = np.array(f['train_data'])
+y_train = np.array(f['train_label'])
+x_val = np.array(f['val_data'])
+y_val = np.array(f['val_label'])
+
 
 img_size = x_train.shape[1:3]
 num_classes = y_train.shape[1]

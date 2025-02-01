@@ -135,3 +135,8 @@ dmypy.json
 *.pb
 *.index
 *.data*
+
+# Other data files
+*.txt
+*.zip
+*.png
