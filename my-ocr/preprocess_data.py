@@ -38,7 +38,7 @@ from image_reader import data_reader
 
 def process_images(data_path, max_samples, train, val, seed, save_path, save_name, combined_classes_hex=[]):
     merge_map = {}
-    for merge in combined_classes:
+    for merge in combined_classes_hex:
         for c in merge:
             merge_map[c] = merge
 
@@ -98,7 +98,7 @@ def process_images(data_path, max_samples, train, val, seed, save_path, save_nam
                 merge = merge_map[c_hex]
                 # Limit merged classes to have the same number of samples from each
                 min_class_size = min([len(all_images[c_hex_i]) for c_hex_i in merge])
-                merge_samples = min(max_samples, min_class_size*len(merge))
+
                 if max_samples < min_class_size*len(merge):
                     subclass_samples = max_samples//len(merge)
                 else:
@@ -134,6 +134,22 @@ def process_images(data_path, max_samples, train, val, seed, save_path, save_nam
     train_images = np.array(train_images)
     val_images = np.array(val_images)
     test_images = np.array(test_images)
+    train_labels = np.array(train_labels)
+    val_labels = np.array(val_labels)
+    test_labels = np.array(test_labels)
+
+    # Random shuffle for images and labels together.
+    idx = rng.permutation(len(train_images))
+    train_images = train_images[idx]
+    train_labels = train_labels[idx]
+    idx = rng.permutation(len(val_images))
+    val_images = val_images[idx]
+    val_labels = val_labels[idx]
+    idx = rng.permutation(len(test_images))
+    test_images = test_images[idx]
+    test_labels = test_labels[idx]
+
+    # Convert labels to categorical
     train_labels = tf.keras.utils.to_categorical(train_labels, number_of_labels)
     val_labels = tf.keras.utils.to_categorical(val_labels, number_of_labels)
     test_labels = tf.keras.utils.to_categorical(test_labels, number_of_labels)
@@ -181,11 +197,11 @@ if __name__ == '__main__':
 
     save_name = f'full_62_classes_seed{seed}'
     combined_classes = []
-    # save_name = 'capital_merge_seed{seed}'
+    # save_name = f'capital_merge_seed{seed}'
     # combined_classes = [('c', 'C'), ('k', 'K'), ('m', 'M'), ('p', 'P'),
     #                     ('s', 'S'), ('u', 'U'), ('v', 'V'), ('w', 'W'),
     #                     ('x', 'X'), ('y', 'Y'), ('z', 'Z'), ('o', 'O')]
-    # save_name = 'capital_and_zero_merge_seed{seed}'
+    # save_name = f'capital_and_zero_merge_seed{seed}'
     # combined_classes = [('c', 'C'), ('k', 'K'), ('m', 'M'), ('p', 'P'),
     #                     ('s', 'S'), ('u', 'U'), ('v', 'V'), ('w', 'W'),
     #                     ('x', 'X'), ('y', 'Y'), ('z', 'Z'), ('o', 'O', '0')]
