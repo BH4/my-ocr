@@ -1,94 +1,62 @@
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Input, Dense, Flatten, Conv2D, MaxPooling2D, Dropout, BatchNormalization
+import jax
+import jax.numpy as jnp
+from flax import nnx
+from functools import partial
 
 
-def fully_connected(input_shape, num_classes):
-    model = Sequential()
+class Dense_block(nnx.Module):
+    def __init__(self, in_features: int, out_features: int, rngs: nnx.Rngs):
+        self.linear = nnx.Linear(in_features, out_features, rngs=rngs)
+        self.dropout = nnx.Dropout(0.5, rngs=rngs)
 
-    model.add(Input(input_shape))
-    model.add(Flatten())
-    model.add(Dense(512, activation='relu'))
-    model.add(Dense(512, activation='relu'))
-    model.add(Dense(256, activation='relu'))
-    model.add(Dense(256, activation='relu'))
-    model.add(Dense(num_classes, activation='softmax'))
-
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-    return model
+    def __call__(self, x):
+        x = self.linear(x)
+        x = self.dropout(x)
+        x = jax.nn.relu(x)
+        return x
 
 
-def simple_convolution(input_shape, num_classes):
-    model = Sequential()
+class fully_connected(nnx.Module):
+    def __init__(self, in_features: int, hid_size: list[int], num_classes: int, rngs: nnx.Rngs):
+        self.layers = []
+        self.layers.append(Dense_block(in_features, hid_size[0], rngs=rngs))
+        for in_size, out_size in zip(hid_size[:-1], hid_size[1:]):
+            self.layers.append(Dense_block(in_size, out_size, rngs=rngs))
+        self.layers.append(nnx.Linear(hid_size[-1], num_classes, rngs=rngs))
 
-    model.add(Input(input_shape))
-    model.add(Conv2D(64, kernel_size=(3, 3), activation='relu'))
-    model.add(Conv2D(64, kernel_size=(3, 3), activation='relu'))
-    model.add(Flatten())
-    model.add(Dense(256, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(256, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(num_classes, activation='softmax'))
-
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-    return model
+    def __call__(self, x):
+        x = x.reshape(x.shape[0], -1)  # flatten
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
-def full_convolution(input_shape, num_classes):
-    model = Sequential()
+class CNN(nnx.Module):
+    """A simple CNN model."""
 
-    model.add(Input(input_shape))
-    model.add(Conv2D(64, kernel_size=7, activation='relu'))
-    model.add(Conv2D(64, kernel_size=7, activation='relu'))
-    model.add(BatchNormalization())
-    model.add(MaxPooling2D())
-    model.add(Conv2D(64, kernel_size=5, activation='relu'))
-    model.add(Conv2D(64, kernel_size=5, activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Conv2D(num_classes, kernel_size=2, activation='softmax'))
-    model.add(Flatten())
+    def __init__(self, in_shape: tuple, num_classes: int, rngs: nnx.Rngs):
+        self.conv1 = nnx.Conv(1, 32, kernel_size=(3, 3), rngs=rngs)
+        self.conv2 = nnx.Conv(32, 32, kernel_size=(3, 3), rngs=rngs)
+        self.max_pool = partial(nnx.max_pool, window_shape=(2, 2), strides=(2, 2))
 
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+        # 3 max_pool layers. Conv has 'SAME' padding.
+        # Assumes in_shape values are powers of 2
+        flat = 32*(in_shape[0]//2**3)*(in_shape[1]//2**3)
+        self.linear1 = nnx.Linear(flat, 256, rngs=rngs)
+        self.linear2 = nnx.Linear(256, num_classes, rngs=rngs)
 
-    return model
-
-
-def medium_convolution_network(input_shape, num_classes):
-    model = Sequential()
-
-    model.add(Input(input_shape))
-    model.add(Conv2D(128, kernel_size=(5, 5), activation='relu'))
-    model.add(Conv2D(128, kernel_size=(5, 5), activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Conv2D(64, kernel_size=(3, 3), activation='relu'))
-    model.add(Conv2D(64, kernel_size=(3, 3), activation='relu'))
-    model.add(BatchNormalization())
-    model.add(Flatten())
-    model.add(Dense(256, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(128, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(64, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(64, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(num_classes, activation='softmax'))
-
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-    return model
+    def __call__(self, x):
+        x = self.max_pool(nnx.relu(self.conv1(x)))
+        x = self.max_pool(nnx.relu(self.conv2(x)))
+        x = self.max_pool(nnx.relu(self.conv2(x)))
+        x = x.reshape(x.shape[0], -1)  # flatten
+        x = nnx.relu(self.linear1(x))
+        x = self.linear2(x)
+        return x
 
 
 if __name__ == '__main__':
-    img_size = (32, 32)
-    input_shape = (img_size[0], img_size[1], 1)
-
-    model = fully_connected(input_shape, 62)
-    # model = simple_convolution(input_shape, 62)
-    # model = full_convolution(input_shape, 62)
-    # model = medium_convolution_network(input_shape, 62)
-
-    model.build()
-    model.summary()
+    # Cannot figure out how to show the model.
+    # Can only show the layers that are defined in the init function.
+    model = fully_connected(128*128, [64, 64], 62, nnx.Rngs(0))
+    print(model(jnp.ones((1, 128, 128, 1))))
