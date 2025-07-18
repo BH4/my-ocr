@@ -1,52 +1,59 @@
-import os
-
 import matplotlib.pyplot as plt
+import equinox as eqx
 import optax
-from flax import nnx
-from sklearn.metrics import confusion_matrix
 
 import numpy as np
+import jax
 import jax.numpy as jnp
 import h5py
 
-from define_models import fully_connected, CNN
+from jaxtyping import Array, Float, Int, PyTree
 
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "False"
+from define_models import CNN
+import json
+
 
 # Hyper parameters
 batch_size = 32
 learning_rate = 0.0005
 momentum = 0.9
-net_seed = 3  # For nnx.Rngs
-data_seed = 7  # For permutation
-epochs = 1
+seed = 3  # For nnx.Rngs
+num_epochs = 1
 
-eval_every = 100
+print_every = 100
+
+key = jax.random.PRNGKey(seed)
 
 # Get dataset
-dir_path = os.path.dirname(os.path.realpath(__file__))
-f = h5py.File(dir_path+'/../data/processed/full_62_classes_seed4444_train.h5', 'r')
+# dataset_name = 'tiny_test'
+dataset_name = 'full_62_classes_seed4444'
+
+f = h5py.File(f'../data/processed/{dataset_name}_train.h5', 'r')
 x_train = np.array(f['train_data'])
 y_train = np.array(f['train_label'])
 x_val = np.array(f['val_data'])
 y_val = np.array(f['val_label'])
 
 num_classes = y_train.shape[1]
+img_size = x_train.shape[1:]
 
+assert img_size[0] == img_size[1] and img_size[0] == 128
+
+num_train_samples = x_train.shape[0]
+num_val_samples = x_val.shape[0]
 
 # Reshape to expected
-x_train = x_train.reshape((*x_train.shape, 1)).astype(jnp.float32)
-x_val = x_val.reshape((*x_val.shape, 1)).astype(jnp.float32)
+x_train = x_train.reshape((num_train_samples, 1, *img_size)).astype(jnp.float32)
+x_val = x_val.reshape((num_val_samples, 1, *img_size)).astype(jnp.float32)
 y_train = jnp.argmax(y_train, axis=-1)
 y_val = jnp.argmax(y_val, axis=-1)
 
-print(x_train.shape)
-print(y_train.shape)
-print(x_val.shape)
-print(y_val.shape)
+print(f'{x_train.shape=}')
+print(f'{y_train.shape=}')
+print(f'{x_val.shape=}')
+print(f'{y_val.shape=}')
 
-
-# Convert data to dictionary format.
+# Convert data to batched format.
 train_ds = []
 for i in range(0, len(x_train), batch_size):
     batch = {
@@ -56,7 +63,7 @@ for i in range(0, len(x_train), batch_size):
     train_ds.append(batch)
 
 val_ds = []  # Val set batches are only to keep metric computation within the memory limit
-for i in range(0, len(x_val), 4*batch_size):
+for i in range(0, len(x_val), batch_size):
     batch = {
         'image': x_val[i:i+batch_size],
         'label': y_val[i:i+batch_size]
@@ -64,95 +71,135 @@ for i in range(0, len(x_val), 4*batch_size):
     val_ds.append(batch)
 
 
-img_size = x_train.shape[1:]
+# Setup model and training functions
+net_hyperparams = (img_size, num_classes)
+model = CNN(*net_hyperparams, key)
+eqx.nn.inference_mode(False)  # Ensure stochastic layers are on
 
 
-# Train
-input_shape = (img_size[0], img_size[1])
-# hid_size = [256, 128, 64]
-# model = fully_connected(img_size[0]*img_size[1], hid_size, num_classes, rngs=nnx.Rngs(net_seed))
-model = CNN(input_shape, num_classes, rngs=nnx.Rngs(net_seed))
-# model = CNN_Large(input_shape, num_classes, rngs=nnx.Rngs(net_seed))
+optimizer = optax.adamw(learning_rate, momentum)
 
 
-# print(val_ds[0]['image'].shape)
-# print(val_ds[0]['label'].shape)
-# print(model(val_ds[0]['image']).shape)
-# quit()
+@eqx.filter_jit
+def loss_fn(
+            model: eqx.Module,
+            x: Float[Array, "batch 1 128 128"],
+            y: Int[Array, " batch"]
+            ) -> Float[Array, ""]:
+    y_pred = jax.vmap(model)(x)
+    return cross_entropy(y, y_pred), y_pred
 
 
-optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, momentum))
-metrics = nnx.MultiMetric(
-  accuracy=nnx.metrics.Accuracy(),
-  loss=nnx.metrics.Average('loss'),
-)
+def cross_entropy(
+                  y: Int[Array, " batch"],
+                  y_pred: Float[Array, "batch num_classes"]
+                  ) -> Float[Array, ""]:
+    # y are the true targets.
+    # y_pred are the log-softmax'd predictions.
+    y_pred = jnp.take_along_axis(y_pred, jnp.expand_dims(y, 1), axis=1)
+    return -jnp.mean(y_pred)
 
 
-def loss_fn(model: nnx.Module, batch):
-    logits = model(batch['image'])
-    loss = optax.softmax_cross_entropy_with_integer_labels(
-      logits=logits, labels=batch['label']
-    ).mean()
-    return loss, logits
+@eqx.filter_jit
+def compute_accuracy(
+                     y_pred: Float[Array, "batch num_classes"],
+                     y: Int[Array, " batch"]
+                     ) -> Float[Array, ""]:
+    """
+    This function computes the average accuracy on a batch.
+    """
+    y_pred = jnp.argmax(y_pred, axis=1)
+    return jnp.mean(y == y_pred)
 
 
-@nnx.jit
-def train_step(model: nnx.Module, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch):
-    """Train for a single step."""
-    grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
-    (loss, logits), grads = grad_fn(model, batch)
-    metrics.update(loss=loss, logits=logits, labels=batch['label'])  # In-place updates.
-    optimizer.update(grads)  # In-place updates.
+def evaluate(model, dataset):
+    """
+    This function evaluates the model on the test dataset,
+    computing both the average loss and the average accuracy.
+    """
+    # Turn off stochastic layers for evaluation
+    eqx.nn.inference_mode(True)
+    avg_loss = 0
+    avg_acc = 0
+    for batch in dataset:
+        x = batch['image']
+        y = batch['label']
+        loss, y_pred = loss_fn(model, x, y)
+        avg_loss += loss
+        avg_acc += compute_accuracy(y_pred, y)
+    eqx.nn.inference_mode(False)
+    return avg_loss / len(dataset), avg_acc / len(dataset)
 
 
-@nnx.jit
-def eval_step(model: nnx.Module, metrics: nnx.MultiMetric, batch):
-    loss, logits = loss_fn(model, batch)
-    metrics.update(loss=loss, logits=logits, labels=batch['label'])  # In-place updates.
+@eqx.filter_jit
+def train_step(
+               model: eqx.Module,
+               opt_state: PyTree,
+               x: Float[Array, "batch 1 128 128"],
+               y: Int[Array, " batch"],
+):
+    grad_fn = eqx.filter_value_and_grad(loss_fn, has_aux=True)
+    (loss_value, y_pred), grads = grad_fn(model, x, y)
+    updates, opt_state = optimizer.update(
+        grads, opt_state, eqx.filter(model, eqx.is_array)
+    )
+    model = eqx.apply_updates(model, updates)
+    return model, opt_state, loss_value
 
 
 metrics_history = {
   'train_loss': [],
-  'train_accuracy': [],
-  'test_loss': [],
-  'test_accuracy': [],
+  'val_loss': [],
+  'val_accuracy': [],
 }
 
-for e in range(epochs):
-    for epoch_step, batch in enumerate(train_ds):
-        step = len(train_ds)*e + epoch_step
 
-        train_step(model, optimizer, metrics, batch)
+def train(model, train_ds, val_ds, optimizer, num_epochs, print_every):
+    # Filter non-arrays from model.
+    opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
 
-        if (step > 0 and (step % eval_every == 0)):# or step == len(train_ds)-1:
-            # Log the training metrics.
-            for metric, value in metrics.compute().items():
-                metrics_history[f'train_{metric}'].append(value)
-            metrics.reset()  # Reset the metrics for the test set.
+    for e in range(num_epochs):
+        for epoch_step, batch in enumerate(train_ds):
+            step = len(train_ds)*e + epoch_step
 
-            for test_batch in val_ds:
-                eval_step(model, metrics, test_batch)
+            x = batch['image']
+            y = batch['label']
+            model, opt_state, train_loss = train_step(model, opt_state, x, y)
+            if (step % print_every) == 0 or (step == len(train_ds)*num_epochs - 1):
+                val_loss, val_accuracy = evaluate(model, val_ds)
 
-            # Log the test metrics.
-            for metric, value in metrics.compute().items():
-                metrics_history[f'test_{metric}'].append(value)
-            metrics.reset()  # Reset the metrics for the next training epoch.
+                metrics_history['train_loss'].append(train_loss.item())
+                metrics_history['val_loss'].append(val_loss.item())
+                metrics_history['val_accuracy'].append(val_accuracy.item())
 
-            output = f'step = {step}, '
-            output += f'train_loss = {metrics_history["train_loss"][-1]:.2f}, '
-            output += f'train_accuracy = {metrics_history["train_accuracy"][-1]:.2f}, '
-            output += f'test_loss = {metrics_history["test_loss"][-1]:.2f}, '
-            output += f'test_accuracy = {metrics_history["test_accuracy"][-1]:.2f}'
+                output = f'{step=}, '
+                output += f'train_loss = {train_loss.item():.2f}, '
+                output += f'val_loss = {val_loss.item():.2f}, '
+                output += f'val_accuracy = {val_accuracy.item():.2f}'
+                print(output)
+    return model
 
-            print(output)
+
+model = train(model, train_ds, val_ds, optimizer, num_epochs, print_every)
+
+
+def save(filename, net_hyperparams, model):
+    with open(filename, "wb") as f:
+        hyperparam_str = json.dumps(net_hyperparams)
+        f.write((hyperparam_str + "\n").encode())
+        eqx.tree_serialise_leaves(f, model)
+
+
+save('../models/temp.eqx', net_hyperparams, model)
+
 
 # Plot loss and accuracy in subplots
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
 ax1.set_title('Loss')
 ax2.set_title('Accuracy')
-for dataset in ('train', 'test'):
-    ax1.plot(metrics_history[f'{dataset}_loss'], label=f'{dataset}_loss')
-    ax2.plot(metrics_history[f'{dataset}_accuracy'], label=f'{dataset}_accuracy')
+ax1.plot(metrics_history[f'train_loss'], label=f'train_loss')
+ax1.plot(metrics_history[f'val_loss'], label=f'val_loss')
+ax2.plot(metrics_history[f'val_accuracy'], label=f'val_accuracy')
 ax1.legend()
 ax2.legend()
 plt.show()
