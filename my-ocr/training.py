@@ -2,15 +2,14 @@ import matplotlib.pyplot as plt
 import equinox as eqx
 import optax
 
-import numpy as np
 import jax
 import jax.numpy as jnp
-import h5py
 
 from jaxtyping import Array, Float, Int, PyTree
 
 from define_models import CNN
-import json
+
+from utils import save, train_load
 
 
 # Hyper parameters
@@ -18,64 +17,23 @@ batch_size = 32
 learning_rate = 0.0005
 momentum = 0.9
 seed = 3  # For nnx.Rngs
-num_epochs = 1
+num_epochs = 5
 
 print_every = 100
 
 key = jax.random.PRNGKey(seed)
 
 # Get dataset
-# dataset_name = 'tiny_test'
-dataset_name = 'full_62_classes_seed4444'
-
-f = h5py.File(f'../data/processed/{dataset_name}_train.h5', 'r')
-x_train = np.array(f['train_data'])
-y_train = np.array(f['train_label'])
-x_val = np.array(f['val_data'])
-y_val = np.array(f['val_label'])
-
-num_classes = y_train.shape[1]
-img_size = x_train.shape[1:]
-
+#dataset_name = 'full_62_classes_seed4444'
+dataset_name = 'all_capital_merge_seed4444'
+model_name = 'all_capital_merge.eqx'
+train_ds, val_ds, num_classes, img_size, _ = train_load(dataset_name, batch_size)
 assert img_size[0] == img_size[1] and img_size[0] == 128
-
-num_train_samples = x_train.shape[0]
-num_val_samples = x_val.shape[0]
-
-# Reshape to expected
-x_train = x_train.reshape((num_train_samples, 1, *img_size)).astype(jnp.float32)
-x_val = x_val.reshape((num_val_samples, 1, *img_size)).astype(jnp.float32)
-y_train = jnp.argmax(y_train, axis=-1)
-y_val = jnp.argmax(y_val, axis=-1)
-
-print(f'{x_train.shape=}')
-print(f'{y_train.shape=}')
-print(f'{x_val.shape=}')
-print(f'{y_val.shape=}')
-
-# Convert data to batched format.
-train_ds = []
-for i in range(0, len(x_train), batch_size):
-    batch = {
-        'image': x_train[i:i+batch_size],
-        'label': y_train[i:i+batch_size]
-    }
-    train_ds.append(batch)
-
-val_ds = []  # Val set batches are only to keep metric computation within the memory limit
-for i in range(0, len(x_val), batch_size):
-    batch = {
-        'image': x_val[i:i+batch_size],
-        'label': y_val[i:i+batch_size]
-    }
-    val_ds.append(batch)
-
 
 # Setup model and training functions
 net_hyperparams = (img_size, num_classes)
 model = CNN(*net_hyperparams, key)
 eqx.nn.inference_mode(False)  # Ensure stochastic layers are on
-
 
 optimizer = optax.adamw(learning_rate, momentum)
 
@@ -136,8 +94,7 @@ def train_step(
                model: eqx.Module,
                opt_state: PyTree,
                x: Float[Array, "batch 1 128 128"],
-               y: Int[Array, " batch"],
-):
+               y: Int[Array, " batch"]):
     grad_fn = eqx.filter_value_and_grad(loss_fn, has_aux=True)
     (loss_value, y_pred), grads = grad_fn(model, x, y)
     updates, opt_state = optimizer.update(
@@ -181,17 +138,7 @@ def train(model, train_ds, val_ds, optimizer, num_epochs, print_every):
 
 
 model = train(model, train_ds, val_ds, optimizer, num_epochs, print_every)
-
-
-def save(filename, net_hyperparams, model):
-    with open(filename, "wb") as f:
-        hyperparam_str = json.dumps(net_hyperparams)
-        f.write((hyperparam_str + "\n").encode())
-        eqx.tree_serialise_leaves(f, model)
-
-
-save('../models/temp.eqx', net_hyperparams, model)
-
+save(f'../models/{model_name}', net_hyperparams, model)
 
 # Plot loss and accuracy in subplots
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))

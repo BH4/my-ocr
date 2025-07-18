@@ -195,16 +195,20 @@ if __name__ == '__main__':
     seed = 4444
     save_path = '../data/processed'
 
-    save_name = f'full_62_classes_seed{seed}'
-    combined_classes = []
+    #save_name = f'full_62_classes_seed{seed}'
+    #combined_classes = []
     # save_name = f'capital_merge_seed{seed}'
     # combined_classes = [('c', 'C'), ('k', 'K'), ('m', 'M'), ('p', 'P'),
     #                     ('s', 'S'), ('u', 'U'), ('v', 'V'), ('w', 'W'),
     #                     ('x', 'X'), ('y', 'Y'), ('z', 'Z'), ('o', 'O')]
-    # save_name = f'capital_and_zero_merge_seed{seed}'
-    # combined_classes = [('c', 'C'), ('k', 'K'), ('m', 'M'), ('p', 'P'),
-    #                     ('s', 'S'), ('u', 'U'), ('v', 'V'), ('w', 'W'),
-    #                     ('x', 'X'), ('y', 'Y'), ('z', 'Z'), ('o', 'O', '0')]
+    #save_name = f'capital_and_zero_merge_seed{seed}'
+    #combined_classes = [('c', 'C'), ('k', 'K'), ('m', 'M'), ('p', 'P'),
+    #                    ('s', 'S'), ('u', 'U'), ('v', 'V'), ('w', 'W'),
+    #                    ('x', 'X'), ('y', 'Y'), ('z', 'Z'), ('o', 'O', '0')]
+    save_name = f'all_capital_merge_seed{seed}'
+    combined_classes = []
+    for i in range(26):
+        combined_classes.append((chr(ord('a')+i), chr(ord('A')+i)))
     ###########################################################################
 
     # Convert class names to hex values
